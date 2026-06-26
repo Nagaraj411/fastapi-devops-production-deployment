@@ -215,7 +215,7 @@ docker compose version
 ### 4. Clone the Repository
 
 ```bash
-git clone https://github.com/spandanaerukulla/fastapi-devops-production-deployment.git
+git clone https://github.com/Nagaraj411/fastapi-devops-production-deployment.git
 cd fastapi-devops-production-deployment
 ```
 
