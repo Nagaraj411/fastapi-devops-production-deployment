@@ -1,0 +1,88 @@
+name: Deploy FastAPI to EC2
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t fastapi-app .
+
+      - name: Deploy application to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -e
+
+            cd ${{ secrets.APP_DIR }}
+
+            echo "Pulling latest source code..."
+            git fetch origin master
+            git reset --hard origin/master
+
+            echo "Validating Docker Compose..."
+            docker compose config
+
+            echo "Building and restarting containers..."
+            docker compose up -d --build --remove-orphans
+
+            echo "Current container status..."
+            docker compose ps
+
+            echo "Waiting for Nginx and FastAPI to become ready..."
+
+            application_ready=false
+
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent http://localhost/health > /dev/null; then
+                echo "Application became ready on attempt ${attempt}."
+                application_ready=true
+                break
+              fi
+
+              echo "Attempt ${attempt} failed. Waiting 5 seconds..."
+              sleep 5
+            done
+
+            if [ "$application_ready" != "true" ]; then
+              echo "Application did not become ready in time."
+
+              echo "Container status:"
+              docker compose ps
+
+              echo "Nginx logs:"
+              docker compose logs --tail=100 nginx
+
+              echo "FastAPI logs:"
+              docker compose logs --tail=100 fastapi
+
+              exit 1
+            fi
+
+            echo "Testing all application endpoints..."
+            curl --fail http://localhost/health
+            curl --fail http://localhost/db-check
+            curl --fail http://localhost/redis-check
+
+            echo "Removing unused Docker images..."
+            docker image prune -f
+
+            echo "Deployment completed successfully."
